@@ -6,6 +6,7 @@ import { PropertyModal } from './components/PropertyModal'
 import { LeaseModal } from './components/LeaseModal'
 import { DocumentPanel } from './components/DocumentPanel'
 import LoginPage from './pages/LoginPage'
+import CashAccountsPage from './components/CashAccountsPage'
 import {
   Noise, Spinner, StatusBadge, ConfirmDialog, RealtimeDot,
   fmt, fmtPct, fmtDate, getLeaseStatus
@@ -476,13 +477,7 @@ export default function App() {
           {activePage === 'realestate' && (
             <RealEstatePage onAddProperty={fn => setAddPropertyFn(fn)} />
           )}
-          {activePage === 'cash' && (
-            <ComingSoon
-              icon="💳"
-              title="Cash Accounts"
-              desc="Connect your bank accounts via SimpleFIN to track balances and transactions in real time."
-            />
-          )}
+          {activePage === 'cash' && <CashAccountsPage />}
           {activePage === 'networth' && (
             <ComingSoon
               icon="📊"
