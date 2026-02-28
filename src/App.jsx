@@ -1,21 +1,33 @@
-import React from 'react'
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { supabase } from './lib/supabase'
 import { useProperties, fromDb } from './hooks/useProperties'
 import { useLeases, leaseFromDb } from './hooks/useLeases'
 import { PropertyModal } from './components/PropertyModal'
 import { LeaseModal } from './components/LeaseModal'
 import { DocumentPanel } from './components/DocumentPanel'
-import { Noise, Spinner, StatusBadge, ConfirmDialog, RealtimeDot, fmt, fmtPct, fmtDate, getLeaseStatus } from './components/shared'
+import LoginPage from './pages/LoginPage'
+import {
+  Noise, Spinner, StatusBadge, ConfirmDialog, RealtimeDot,
+  fmt, fmtPct, fmtDate, getLeaseStatus
+} from './components/shared'
 import './App.css'
 
+// ── Nav items ─────────────────────────────────────────────────────────────────
+const NAV = [
+  { id: 'realestate', label: 'Real Estate', icon: '🏠' },
+  { id: 'cash',       label: 'Cash',        icon: '💳' },
+  { id: 'networth',   label: 'Net Worth',   icon: '📊' },
+]
+
 // ── Header ────────────────────────────────────────────────────────────────────
-function Header({ onAddProperty, realtimeActive }) {
+function Header({ onAddProperty, realtimeActive, onSignOut, activePage }) {
   const [scrolled, setScrolled] = useState(false)
   useEffect(() => {
     const h = () => setScrolled(window.scrollY > 20)
-    window.addEventListener('scroll', h); return () => window.removeEventListener('scroll', h)
+    window.addEventListener('scroll', h)
+    return () => window.removeEventListener('scroll', h)
   }, [])
+
   return (
     <header className={`header ${scrolled ? 'scrolled' : ''}`}>
       <div className="header-inner">
@@ -26,17 +38,53 @@ function Header({ onAddProperty, realtimeActive }) {
             <span className="logo-tagline">Where Wealth Takes Root</span>
           </div>
         </div>
+
+        {/* Desktop nav */}
+        <nav className="desktop-nav">
+          {NAV.map(n => (
+            <a key={n.id} href={`#${n.id}`}
+              className={`desktop-nav-item ${activePage === n.id ? 'active' : ''}`}>
+              {n.label}
+            </a>
+          ))}
+        </nav>
+
         <div className="header-right">
           <RealtimeDot active={realtimeActive} />
-          <span className="header-date">
-            {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
-          </span>
-          <button className="btn-add" onClick={onAddProperty}>
-            <span>+</span> Add Property
+          {activePage === 'realestate' && (
+            <button className="btn-add" onClick={onAddProperty}>
+              <span>+</span> Add Property
+            </button>
+          )}
+          <button className="btn-signout" onClick={onSignOut} title="Sign out">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+              <polyline points="16,17 21,12 16,7"/>
+              <line x1="21" y1="12" x2="9" y2="12"/>
+            </svg>
           </button>
         </div>
       </div>
     </header>
+  )
+}
+
+// ── Mobile Bottom Nav ─────────────────────────────────────────────────────────
+function MobileNav({ activePage, onAddProperty }) {
+  return (
+    <nav className="mobile-nav">
+      {NAV.map(n => (
+        <a key={n.id} href={`#${n.id}`}
+          className={`mobile-nav-item ${activePage === n.id ? 'active' : ''}`}>
+          <span className="mobile-nav-icon">{n.icon}</span>
+          <span className="mobile-nav-label">{n.label}</span>
+        </a>
+      ))}
+      <button className="mobile-nav-item mobile-nav-add" onClick={onAddProperty}>
+        <span className="mobile-nav-icon mobile-add-icon">+</span>
+        <span className="mobile-nav-label">Add</span>
+      </button>
+    </nav>
   )
 }
 
@@ -49,7 +97,7 @@ function SummaryBar({ properties }) {
   return (
     <div className="summary-bar">
       {[
-        { label: 'Properties',       value: properties.length, raw: true },
+        { label: 'Properties',        value: properties.length, raw: true },
         { label: 'Total Asset Value', value: fmt(totalValue) },
         { label: 'Total Equity',      value: fmt(totalEquity), highlight: true },
         { label: 'Monthly Rent',      value: fmt(totalRent) },
@@ -59,6 +107,18 @@ function SummaryBar({ properties }) {
           <span className="summary-value">{c.value}</span>
         </div>
       ))}
+    </div>
+  )
+}
+
+// ── Coming Soon placeholder ───────────────────────────────────────────────────
+function ComingSoon({ icon, title, desc }) {
+  return (
+    <div className="coming-soon">
+      <div className="coming-soon-icon">{icon}</div>
+      <h3 className="coming-soon-title">{title}</h3>
+      <p className="coming-soon-desc">{desc}</p>
+      <span className="coming-soon-badge">Coming Soon</span>
     </div>
   )
 }
@@ -96,146 +156,7 @@ function LeaseRow({ lease, onEdit, onDelete }) {
   )
 }
 
-// ── Property Card ─────────────────────────────────────────────────────────────
-function PropertyCard({ property, onEdit, onDelete }) {
-  const [expanded, setExpanded]     = useState(false)
-  const [activeTab, setActiveTab]   = useState('details')
-  const [leaseModal, setLeaseModal] = useState(null)
-  const [confirmLease, setConfirmLease] = useState(null)
-  const { leases, addLease, updateLease, deleteLease } = useLeases(property.id)
-
-  const equity = (Number(property.purchasePrice) || 0) - (Number(property.mortgageBalance) || 0)
-  const activeLeases = leases.filter(l => getLeaseStatus(l) === 'active' || getLeaseStatus(l) === 'expiring')
-
-  const handleSaveLease = async (data) => {
-    if (data.id) await updateLease(data.id, data)
-    else await addLease(data)
-    setLeaseModal(null)
-  }
-
-  return (
-    <div className={`property-card ${expanded ? 'expanded' : ''}`}>
-      {/* Card Header */}
-      <div className="card-header" onClick={() => setExpanded(e => !e)}>
-        <div className="card-header-left">
-          <div className="card-icon">🏠</div>
-          <div className="card-title-block">
-            <h3 className="card-address">{property.address || 'Unnamed Property'}</h3>
-            <span className="card-entity">{property.titleLegalEntity || 'No legal entity'}</span>
-          </div>
-        </div>
-        <div className="card-header-right">
-          <div className="card-metrics">
-            <Metric label="Value"    value={fmt(property.purchasePrice)} />
-            <Metric label="Equity"   value={fmt(equity)}                 accent />
-            <Metric label="Rent/mo"  value={fmt(property.currentRent)} />
-            <Metric label="Leases"   value={`${activeLeases.length} active`} />
-          </div>
-          <span className="card-chevron">{expanded ? '−' : '+'}</span>
-        </div>
-      </div>
-
-      {/* Expanded Body */}
-      {expanded && (
-        <div className="card-body">
-          <div className="card-tabs">
-            {['details', 'leases', 'documents'].map(tab => (
-              <button key={tab} className={`tab ${activeTab === tab ? 'active' : ''}`}
-                onClick={() => setActiveTab(tab)}>
-                {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                {tab === 'leases' && leases.length > 0 && <span className="tab-badge">{leases.length}</span>}
-              </button>
-            ))}
-          </div>
-
-          {/* Details Tab */}
-          {activeTab === 'details' && (
-            <div className="tab-content">
-              <div className="card-sections">
-                <DetailSection title="Property">
-                  <Detail label="Purchase Price" value={fmt(property.purchasePrice)} />
-                  <Detail label="Ownership" value={fmtPct(property.ownershipPct)} />
-                  <Detail label="Monthly Rent" value={fmt(property.currentRent)} />
-                  <Detail label="Legal Entity" value={property.titleLegalEntity} />
-                </DetailSection>
-                <DetailSection title="Mortgage">
-                  <Detail label="Lender" value={property.loanProvider} />
-                  <Detail label="Interest Rate" value={fmtPct(property.interestRate)} />
-                  <Detail label="Balance" value={fmt(property.mortgageBalance)} />
-                  <Detail label="Login" value={property.mortgageUsername} sensitive />
-                </DetailSection>
-                <DetailSection title="HOA">
-                  <Detail label="Portal" value={property.hoaPortalUrl} isUrl />
-                  <Detail label="Username" value={property.hoaUsername} sensitive />
-                  <Detail label="Monthly Dues" value={fmt(property.hoaDues)} />
-                </DetailSection>
-              </div>
-              <div className="card-actions">
-                <button className="btn-edit" onClick={() => onEdit(property)}>Edit Property</button>
-                <button className="btn-delete" onClick={() => onDelete(property.id)}>Delete</button>
-              </div>
-            </div>
-          )}
-
-          {/* Leases Tab */}
-          {activeTab === 'leases' && (
-            <div className="tab-content">
-              <div className="tab-toolbar">
-                <button className="btn-add-small" onClick={() => setLeaseModal('new')}>+ New Lease</button>
-              </div>
-              {leases.length === 0 ? (
-                <p className="tab-empty">No leases added yet.</p>
-              ) : (
-                <div className="leases-list">
-                  {leases.map(l => (
-                    <LeaseRow
-                      key={l.id} lease={l}
-                      onEdit={(lease) => setLeaseModal(lease)}
-                      onDelete={(id) => setConfirmLease(id)}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Documents Tab */}
-          {activeTab === 'documents' && (
-            <div className="tab-content">
-              <DocumentPanel propertyId={property.id} />
-            </div>
-          )}
-        </div>
-      )}
-
-      {leaseModal && (
-        <LeaseModal
-          propertyId={property.id}
-          lease={leaseModal === 'new' ? null : leaseModal}
-          onSave={handleSaveLease}
-          onClose={() => setLeaseModal(null)}
-        />
-      )}
-      {confirmLease && (
-        <ConfirmDialog
-          message="Delete this lease? This cannot be undone."
-          onConfirm={async () => { await deleteLease(confirmLease); setConfirmLease(null) }}
-          onCancel={() => setConfirmLease(null)}
-        />
-      )}
-    </div>
-  )
-}
-
-function Metric({ label, value, accent }) {
-  return (
-    <div className="card-metric">
-      <span className="metric-label">{label}</span>
-      <span className={`metric-value ${accent ? 'accent' : ''}`}>{value}</span>
-    </div>
-  )
-}
-
+// ── Detail helpers ────────────────────────────────────────────────────────────
 function DetailSection({ title, children }) {
   return (
     <div className="card-section">
@@ -265,15 +186,149 @@ function Detail({ label, value, sensitive, isUrl }) {
   )
 }
 
+function Metric({ label, value, accent }) {
+  return (
+    <div className="card-metric">
+      <span className="metric-label">{label}</span>
+      <span className={`metric-value ${accent ? 'accent' : ''}`}>{value}</span>
+    </div>
+  )
+}
+
+// ── Property Card ─────────────────────────────────────────────────────────────
+function PropertyCard({ property, onEdit, onDelete }) {
+  const [expanded, setExpanded]     = useState(false)
+  const [activeTab, setActiveTab]   = useState('details')
+  const [leaseModal, setLeaseModal] = useState(null)
+  const [confirmLease, setConfirmLease] = useState(null)
+  const { leases, addLease, updateLease, deleteLease } = useLeases(property.id)
+
+  const equity       = (Number(property.purchasePrice) || 0) - (Number(property.mortgageBalance) || 0)
+  const activeLeases = leases.filter(l => ['active','expiring'].includes(getLeaseStatus(l)))
+
+  const handleSaveLease = async (data) => {
+    if (data.id) await updateLease(data.id, data)
+    else await addLease(data)
+    setLeaseModal(null)
+  }
+
+  return (
+    <div className={`property-card ${expanded ? 'expanded' : ''}`}>
+      <div className="card-header" onClick={() => setExpanded(e => !e)}>
+        <div className="card-header-left">
+          <div className="card-icon">🏠</div>
+          <div className="card-title-block">
+            <h3 className="card-address">{property.address || 'Unnamed Property'}</h3>
+            <span className="card-entity">{property.titleLegalEntity || 'No legal entity'}</span>
+          </div>
+        </div>
+        <div className="card-header-right">
+          <div className="card-metrics">
+            <Metric label="Value"   value={fmt(property.purchasePrice)} />
+            <Metric label="Equity"  value={fmt(equity)} accent />
+            <Metric label="Rent/mo" value={fmt(property.currentRent)} />
+            <Metric label="Leases"  value={`${activeLeases.length} active`} />
+          </div>
+          <span className="card-chevron">{expanded ? '−' : '+'}</span>
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="card-body">
+          <div className="card-tabs">
+            {['details','leases','documents'].map(tab => (
+              <button key={tab}
+                className={`tab ${activeTab === tab ? 'active' : ''}`}
+                onClick={() => setActiveTab(tab)}>
+                {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                {tab === 'leases' && leases.length > 0 &&
+                  <span className="tab-badge">{leases.length}</span>}
+              </button>
+            ))}
+          </div>
+
+          {activeTab === 'details' && (
+            <div className="tab-content">
+              <div className="card-sections">
+                <DetailSection title="Property">
+                  <Detail label="Purchase Price" value={fmt(property.purchasePrice)} />
+                  <Detail label="Ownership"      value={fmtPct(property.ownershipPct)} />
+                  <Detail label="Monthly Rent"   value={fmt(property.currentRent)} />
+                  <Detail label="Legal Entity"   value={property.titleLegalEntity} />
+                </DetailSection>
+                <DetailSection title="Mortgage">
+                  <Detail label="Lender"        value={property.loanProvider} />
+                  <Detail label="Interest Rate"  value={fmtPct(property.interestRate)} />
+                  <Detail label="Balance"        value={fmt(property.mortgageBalance)} />
+                  <Detail label="Login"          value={property.mortgageUsername} sensitive />
+                </DetailSection>
+                <DetailSection title="HOA">
+                  <Detail label="Portal"         value={property.hoaPortalUrl} isUrl />
+                  <Detail label="Username"        value={property.hoaUsername} sensitive />
+                  <Detail label="Monthly Dues"   value={fmt(property.hoaDues)} />
+                </DetailSection>
+              </div>
+              <div className="card-actions">
+                <button className="btn-edit"   onClick={() => onEdit(property)}>Edit Property</button>
+                <button className="btn-delete" onClick={() => onDelete(property.id)}>Delete</button>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'leases' && (
+            <div className="tab-content">
+              <div className="tab-toolbar">
+                <button className="btn-add-small" onClick={() => setLeaseModal('new')}>+ New Lease</button>
+              </div>
+              {leases.length === 0
+                ? <p className="tab-empty">No leases added yet.</p>
+                : <div className="leases-list">
+                    {leases.map(l => (
+                      <LeaseRow key={l.id} lease={l}
+                        onEdit={lease => setLeaseModal(lease)}
+                        onDelete={id => setConfirmLease(id)}
+                      />
+                    ))}
+                  </div>
+              }
+            </div>
+          )}
+
+          {activeTab === 'documents' && (
+            <div className="tab-content">
+              <DocumentPanel propertyId={property.id} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {leaseModal && (
+        <LeaseModal
+          propertyId={property.id}
+          lease={leaseModal === 'new' ? null : leaseModal}
+          onSave={handleSaveLease}
+          onClose={() => setLeaseModal(null)}
+        />
+      )}
+      {confirmLease && (
+        <ConfirmDialog
+          message="Delete this lease? This cannot be undone."
+          onConfirm={async () => { await deleteLease(confirmLease); setConfirmLease(null) }}
+          onCancel={() => setConfirmLease(null)}
+        />
+      )}
+    </div>
+  )
+}
+
 // ── Empty State ───────────────────────────────────────────────────────────────
 function EmptyState({ onAdd }) {
   return (
     <div className="empty-state">
       <div className="empty-icon">
-        <svg width="60" height="60" viewBox="0 0 60 60" fill="none">
-          <path d="M30 4L56 17V43L30 56L4 43V17L30 4Z" stroke="var(--accent)" strokeWidth="1.5" strokeDasharray="4 3" fill="none"/>
-          <path d="M30 20L42 26.5V39.5L30 46L18 39.5V26.5L30 20Z" fill="var(--accent-dim)" stroke="var(--accent)" strokeWidth="1"/>
-          <path d="M30 28V34M30 24V26" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round"/>
+        <svg width="56" height="56" viewBox="0 0 56 56" fill="none">
+          <path d="M28 4L52 17V39L28 52L4 39V17L28 4Z" stroke="var(--accent)" strokeWidth="1.5" strokeDasharray="4 3" fill="none"/>
+          <path d="M28 18L40 24.5V37.5L28 44L16 37.5V24.5L28 18Z" fill="var(--accent-dim)" stroke="var(--accent)" strokeWidth="1"/>
         </svg>
       </div>
       <h3 className="empty-title">Your vault is empty</h3>
@@ -283,79 +338,57 @@ function EmptyState({ onAdd }) {
   )
 }
 
-// ── App Root ──────────────────────────────────────────────────────────────────
-export default function App() {
+// ── Real Estate Page ──────────────────────────────────────────────────────────
+function RealEstatePage({ onAddProperty }) {
   const { properties: rawProps, loading, error, addProperty, updateProperty, deleteProperty } = useProperties()
   const properties = rawProps.map(fromDb)
-
   const [propertyModal, setPropertyModal] = useState(null)
   const [confirmId, setConfirmId]         = useState(null)
-  const [realtimeActive, setRealtimeActive] = useState(false)
 
-  // Track realtime connection
-  useEffect(() => {
-    const channel = supabase.channel('system').subscribe(status => {
-      setRealtimeActive(status === 'SUBSCRIBED')
-    })
-    return () => supabase.removeChannel(channel)
-  }, [])
-
-  const handleSaveProperty = async (data) => {
+  const handleSave = async (data) => {
     if (data.id) await updateProperty(data.id, data)
     else await addProperty(data)
     setPropertyModal(null)
   }
 
-  if (loading) return (
-    <div className="app-loading">
-      <Spinner size={36} />
-      <p>Loading AnnaVault…</p>
-    </div>
-  )
+  // expose openModal to parent via onAddProperty
+  useEffect(() => {
+    if (onAddProperty) onAddProperty(() => () => setPropertyModal('new'))
+  }, [])
 
-  if (error) return (
-    <div className="app-loading">
-      <p className="error-msg">⚠️ {error}</p>
-      <p className="error-hint">Check your Supabase credentials in <code>.env</code></p>
-    </div>
-  )
+  if (loading) return <div className="page-loading"><Spinner size={32} /></div>
+  if (error)   return <div className="page-error">⚠️ {error}</div>
 
   return (
     <>
-      <Noise />
-      <div className="app-bg" aria-hidden="true" />
-      <Header onAddProperty={() => setPropertyModal('new')} realtimeActive={realtimeActive} />
-      <main className="main">
-        <div className="main-inner">
-          {properties.length > 0 && <SummaryBar properties={properties} />}
-          <div className="section-header">
-            <div className="section-title-block">
-              <h2 className="section-heading"><em>Real Estate</em> Portfolio</h2>
-              <span className="section-count">{properties.length} {properties.length === 1 ? 'property' : 'properties'}</span>
-            </div>
-          </div>
-          {properties.length === 0
-            ? <EmptyState onAdd={() => setPropertyModal('new')} />
-            : <div className="properties-list">
-                {properties.map(p => (
-                  <PropertyCard key={p.id} property={p}
-                    onEdit={prop => setPropertyModal(prop)}
-                    onDelete={id => setConfirmId(id)}
-                  />
-                ))}
-              </div>
-          }
+      <div className="page-header">
+        <div className="page-header-left">
+          <h2 className="page-heading"><em>Real Estate</em> Portfolio</h2>
+          <span className="section-count">{properties.length} {properties.length === 1 ? 'property' : 'properties'}</span>
         </div>
-      </main>
-      <footer className="footer">
-        <span>AnnaVault © {new Date().getFullYear()}</span>
-        <span>Powered by Supabase · Realtime Enabled</span>
-      </footer>
+        <button className="btn-add desktop-only" onClick={() => setPropertyModal('new')}>
+          <span>+</span> Add Property
+        </button>
+      </div>
+
+      {properties.length > 0 && <SummaryBar properties={properties} />}
+
+      {properties.length === 0
+        ? <EmptyState onAdd={() => setPropertyModal('new')} />
+        : <div className="properties-list">
+            {properties.map(p => (
+              <PropertyCard key={p.id} property={p}
+                onEdit={prop => setPropertyModal(prop)}
+                onDelete={id => setConfirmId(id)}
+              />
+            ))}
+          </div>
+      }
 
       {propertyModal && (
         <PropertyModal
           property={propertyModal === 'new' ? null : propertyModal}
-          onSave={handleSaveProperty}
+          onSave={handleSave}
           onClose={() => setPropertyModal(null)}
         />
       )}
@@ -369,3 +402,102 @@ export default function App() {
     </>
   )
 }
+
+// ── App Root ──────────────────────────────────────────────────────────────────
+export default function App() {
+  const [session, setSession]           = useState(null)
+  const [authLoading, setAuthLoading]   = useState(true)
+  const [realtimeActive, setRealtimeActive] = useState(false)
+  const [activePage, setActivePage]     = useState('realestate')
+  const [addPropertyFn, setAddPropertyFn] = useState(null)
+
+  // Auth state
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session)
+      setAuthLoading(false)
+    })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
+      setSession(session)
+    })
+    return () => subscription.unsubscribe()
+  }, [])
+
+  // Realtime connection
+  useEffect(() => {
+    if (!session) return
+    const channel = supabase.channel('system').subscribe(status => {
+      setRealtimeActive(status === 'SUBSCRIBED')
+    })
+    return () => supabase.removeChannel(channel)
+  }, [session])
+
+  // Track active page from hash
+  useEffect(() => {
+    const update = () => {
+      const hash = window.location.hash.replace('#', '') || 'realestate'
+      setActivePage(hash)
+    }
+    update()
+    window.addEventListener('hashchange', update)
+    return () => window.removeEventListener('hashchange', update)
+  }, [])
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
+  }
+
+  const handleAddProperty = () => {
+    if (addPropertyFn) addPropertyFn()
+    else setActivePage('realestate')
+  }
+
+  if (authLoading) return (
+    <div className="app-loading">
+      <img src="/logo.svg" alt="AnnaVault" style={{ width: 48, height: 48, borderRadius: '50%' }} />
+      <Spinner size={24} />
+    </div>
+  )
+
+  if (!session) return <LoginPage />
+
+  return (
+    <>
+      <Noise />
+      <div className="app-bg" aria-hidden="true" />
+      <Header
+        onAddProperty={handleAddProperty}
+        realtimeActive={realtimeActive}
+        onSignOut={handleSignOut}
+        activePage={activePage}
+      />
+      <main className="main">
+        <div className="main-inner">
+          {activePage === 'realestate' && (
+            <RealEstatePage onAddProperty={fn => setAddPropertyFn(fn)} />
+          )}
+          {activePage === 'cash' && (
+            <ComingSoon
+              icon="💳"
+              title="Cash Accounts"
+              desc="Connect your bank accounts via SimpleFIN to track balances and transactions in real time."
+            />
+          )}
+          {activePage === 'networth' && (
+            <ComingSoon
+              icon="📊"
+              title="Net Worth Dashboard"
+              desc="Your complete financial picture — real estate equity, cash balances, and total net worth in one view."
+            />
+          )}
+        </div>
+      </main>
+      <MobileNav activePage={activePage} onAddProperty={handleAddProperty} />
+      <footer className="footer">
+        <span>AnnaVault © {new Date().getFullYear()}</span>
+        <span>Powered by Supabase · Realtime</span>
+      </footer>
+    </>
+  )
+}
+
